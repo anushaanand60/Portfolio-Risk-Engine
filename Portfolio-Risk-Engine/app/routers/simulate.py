@@ -13,7 +13,6 @@ from app.services.alerts import run_post_trade_alerts
 from app.services.risk import compute_portfolio_var
 from app.services.feature_generation import generate_features_for_trade
 from app.services.anomaly_detector import score_anomaly
-from app.services.var_forecaster import predict_var_forecast
 from app.services.risk_classifier import predict_risk_regime
 from app.core.redis import redis_delete
 
@@ -59,7 +58,6 @@ def simulate_trades(portfolio_id: int, db: Session = Depends(get_db)):
         risk_alerts = run_post_trade_alerts(db, trade)
         snapshot = generate_features_for_trade(db, trade)
         score_anomaly(db, snapshot)
-        predict_var_forecast(db, snapshot)
         predict_risk_regime(db, snapshot)
         triggered_alerts.extend(
             [{"alert_type": a.alert_type, "message": a.message} for a in position_alerts + risk_alerts]

@@ -5,7 +5,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/trade_risk_monitor
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/portfolio_risk_engine
       - REDIS_URL=redis://cache:6379/0
       - VAR_THRESHOLD=1000000.0000
       - CONCENTRATION_THRESHOLD=0.4000
@@ -27,7 +27,7 @@ services:
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=trade_risk_monitor
+      - POSTGRES_DB=portfolio_risk_engine
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -47,7 +47,6 @@ def get_current_risk_regime(portfolio_id: int, db: Session = Depends(get_db)):
         "timestamp": snapshot.timestamp,
         "risk_regime": snapshot.risk_regime,
         "risk_regime_probability": float(snapshot.risk_regime_probability) if snapshot.risk_regime_probability is not None else None,
-        "predicted_var_forecast": float(snapshot.risk_var_forecast) if snapshot.risk_var_forecast is not None else None,
         "is_anomaly": snapshot.is_anomaly
     }
 
@@ -63,7 +62,6 @@ def get_risk_regime_history(portfolio_id: int, limit: int = Query(50, ge=1, le=5
             "timestamp": s.timestamp,
             "risk_regime": s.risk_regime,
             "risk_regime_probability": float(s.risk_regime_probability),
-            "predicted_var_forecast": float(s.risk_var_forecast) if s.risk_var_forecast is not None else None,
             "is_anomaly": s.is_anomaly
         }
         for s in snapshots

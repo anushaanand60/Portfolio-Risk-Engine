@@ -21,12 +21,10 @@ class RiskRegimeResponse(BaseModel):
     timestamp: datetime
     risk_regime: Optional[str] = None
     risk_regime_probability: Optional[float] = None
-    predicted_var_forecast: Optional[float] = None
     is_anomaly: Optional[bool] = None
 
 class RiskRegimeHistoryResponse(BaseModel):
     timestamp: datetime
     risk_regime: str
     risk_regime_probability: float
-    predicted_var_forecast: Optional[float] = None
     is_anomaly: Optional[bool] = None

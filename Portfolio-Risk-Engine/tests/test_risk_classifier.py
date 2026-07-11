@@ -19,7 +19,6 @@ from app.services.position import update_position_logic
 from app.services.alerts import run_post_trade_alerts
 from app.services.feature_generation import generate_features_for_trade
 from app.services.anomaly_detector import score_anomaly
-from app.services.var_forecaster import predict_var_forecast
 from app.services.risk_classifier import predict_risk_regime, FEATURES
 
 SQLALCHEMY_TEST_URL = "sqlite:///./test_risk_engine.db"
@@ -49,12 +48,12 @@ def mock_redis_delete(key):
 def setup_db():
     Base.metadata.create_all(bind=engine)
     mock_redis_store.clear()
-    for model_file in ["models/risk_classifier_v1.joblib", "models/var_forecaster_v1.joblib"]:
+    for model_file in ["models/risk_classifier_v1.joblib"]:
         if os.path.exists(model_file):
             os.remove(model_file)
     yield
     Base.metadata.drop_all(bind=engine)
-    for model_file in ["models/risk_classifier_v1.joblib", "models/var_forecaster_v1.joblib"]:
+    for model_file in ["models/risk_classifier_v1.joblib"]:
         if os.path.exists(model_file):
             os.remove(model_file)
 
@@ -100,15 +99,10 @@ def test_risk_classifier_pipeline(client):
         run_post_trade_alerts(db, trade)
         snapshot = generate_features_for_trade(db, trade)
         score_anomaly(db, snapshot)
-        predict_var_forecast(db, snapshot)
     db.commit()
 
     snapshots_count = db.query(FeatureSnapshot).filter(FeatureSnapshot.snapshot_type == "PORTFOLIO").count()
     assert snapshots_count >= 320
-
-    var_train_resp = client.post("/var/train")
-    assert var_train_resp.status_code == 200, f"VaR training failed: {var_train_resp.json()}"
-    assert var_train_resp.json()["status"] == "success"
 
     train_resp = client.post("/risk-classifier/train")
     assert train_resp.status_code == 200
@@ -166,7 +160,6 @@ def test_risk_classifier_pipeline(client):
     assert "timestamp" in regime_data
     assert regime_data["risk_regime"] in ["Low", "Moderate", "High", "Critical"]
     assert regime_data["risk_regime_probability"] is not None
-    assert regime_data["predicted_var_forecast"] is not None
 
     history_resp = client.get("/portfolios/1/risk-regime/history")
     assert history_resp.status_code == 200

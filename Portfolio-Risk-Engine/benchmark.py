@@ -27,10 +27,6 @@ from app.services.anomaly_detector import (
     train_global_anomaly_model, score_anomaly,
     FEATURES as ANOMALY_FEATURES, MODEL_PATH as ANOMALY_MODEL_PATH,
 )
-from app.services.var_forecaster import (
-    train_var_forecaster, predict_var_forecast,
-    FEATURES as VAR_FEATURES, MODEL_PATH as VAR_MODEL_PATH,
-)
 from app.services.risk_classifier import (
     train_risk_classifier, predict_risk_regime,
     FEATURES as CLF_FEATURES, MODEL_PATH as CLF_MODEL_PATH,
@@ -139,74 +135,6 @@ def bench_anomaly(db, latency_runs: int):
     }
 
 
-# Phase 3: VaR Forecasting 
-
-def bench_var(db, latency_runs: int):
-    print(f"\n{SEP}")
-    print("  PHASE 3 — VAR FORECASTING  (RF vs GBM)")
-    print(SEP)
-
-    res = train_var_forecaster(db)
-    size_mb = model_size_mb(VAR_MODEL_PATH)
-    bl = res["baseline_metrics"]
-    rf = res["random_forest"]
-    gb = res["gradient_boosting"]
-
-    print(fmt("Selected model:", res["selected_model"]))
-    print(fmt("Training rows:", res["training_rows"]))
-    print(fmt("Test rows:", res["test_rows"]))
-    print(fmt("Training time:", f"{res['training_time_ms']:,.1f} ms"))
-    print(fmt("Model size:", f"{size_mb:.3f} MB"))
-    print()
-    print(f"  {'Model':<22} {'MAE':>10} {'RMSE':>10} {'R²':>8}")
-    print(f"  {SUBSEP[:54]}")
-    print(f"  {'Persistence (baseline)':<22} {bl['mae']:>10.4f} {bl['rmse']:>10.4f} {bl['r2']:>8.4f}")
-    print(f"  {'RandomForest':<22} {rf['mae']:>10.4f} {rf['rmse']:>10.4f} {rf['r2']:>8.4f}")
-    print(f"  {'GradientBoosting':<22} {gb['mae']:>10.4f} {gb['rmse']:>10.4f} {gb['r2']:>8.4f}")
-    print()
-    print(fmt("Outperformed baseline:", str(res["outperformed_baseline"])))
-    print()
-    print("  Top-10 Feature Importances:")
-    for rank, (feat, imp) in enumerate(list(res["feature_importances"].items())[:10], 1):
-        print(f"    {rank:>2}. {feat:<38} {imp:.4f}")
-
-    sample = (
-        db.query(FeatureSnapshot)
-        .filter(FeatureSnapshot.snapshot_type == "PORTFOLIO")
-        .order_by(FeatureSnapshot.id.desc()).first()
-    )
-    lats = []
-    for _ in range(latency_runs):
-        t0 = time.perf_counter()
-        predict_var_forecast(db, sample)
-        lats.append((time.perf_counter() - t0) * 1000)
-    lats = np.array(lats)
-    print(fmt("Inference latency (median):", f"{np.median(lats):.3f} ms"))
-    print(fmt("Inference latency (p95):", f"{np.percentile(lats, 95):.3f} ms"))
-
-    return {
-        "selected_model": res["selected_model"],
-        "training_rows": res["training_rows"],
-        "test_rows": res["test_rows"],
-        "training_time_ms": round(res["training_time_ms"], 2),
-        "model_size_mb": round(size_mb, 4),
-        "winner": {"mae": round(res["mae"], 4), "rmse": round(res["rmse"], 4), "r2": round(res["r2"], 4)},
-        "random_forest": {k: round(v, 4) for k, v in rf.items()},
-        "gradient_boosting": {k: round(v, 4) for k, v in gb.items()},
-        "baseline": {k: round(v, 4) for k, v in bl.items()},
-        "outperformed_baseline": res["outperformed_baseline"],
-        "feature_importances": {k: round(v, 4) for k, v in res["feature_importances"].items()},
-        "top_10_features": res["top_features"][:10],
-        "static_features": VAR_FEATURES[:9],
-        "temporal_features": VAR_FEATURES[9:],
-        "latency": {
-            "median_ms": round(float(np.median(lats)), 3),
-            "p95_ms": round(float(np.percentile(lats, 95)), 3),
-            "p99_ms": round(float(np.percentile(lats, 99)), 3),
-            "runs": latency_runs,
-        },
-    }
-
 # Phase 4: Risk Classifier
 def bench_classifier(db, latency_runs: int):
     print(f"\n{SEP}")
@@ -298,7 +226,7 @@ def bench_e2e(db, latency_runs: int):
     portfolio_id = 1
     _= db.query(Position).filter(Position.portfolio_id == portfolio_id).first()
 
-    feat_lats, anomaly_lats, var_lats, clf_lats, total_lats = [], [], [], [], []
+    feat_lats, anomaly_lats, clf_lats, total_lats = [], [], [], []
 
     for _ in range(latency_runs):
         trade = Trade(
@@ -323,10 +251,6 @@ def bench_e2e(db, latency_runs: int):
         anomaly_lats.append((time.perf_counter() - t0) * 1000)
 
         t0 = time.perf_counter()
-        predict_var_forecast(db, snapshot)
-        var_lats.append((time.perf_counter() - t0) * 1000)
-
-        t0 = time.perf_counter()
         predict_risk_regime(db, snapshot)
         clf_lats.append((time.perf_counter() - t0) * 1000)
 
@@ -346,7 +270,6 @@ def bench_e2e(db, latency_runs: int):
     rows = [
         ("Feature generation",    feat_lats),
         ("Anomaly scoring",       anomaly_lats),
-        ("VaR forecast",          var_lats),
         ("Risk classification",   clf_lats),
         ("Full pipeline",         total_lats),
     ]
@@ -361,14 +284,13 @@ def bench_e2e(db, latency_runs: int):
         "runs": latency_runs,
         "feature_generation": stats(feat_lats),
         "anomaly_scoring":    stats(anomaly_lats),
-        "var_forecast":       stats(var_lats),
         "risk_classification":stats(clf_lats),
         "full_pipeline":      stats(total_lats),
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Trade Risk Monitor — Benchmark")
+    parser = argparse.ArgumentParser(description="Portfolio-Risk-Engine - Benchmark")
     parser.add_argument("--trades", type=int, default=350,
                         help="Number of trades to simulate (default: 350)")
     parser.add_argument("--latency-runs", type=int, default=100,
@@ -384,14 +306,13 @@ def main():
     engine, db = make_session()
 
     print(f"\n{'#'*65}")
-    print("  REAL-TIME TRADE RISK MONITOR — BENCHMARK")
+    print("  PORTFOLIO-RISK-ENGINE - BENCHMARK")
     print(f"  {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print(f"  trades={args.trades}  latency_runs={args.latency_runs}")
     print(f"{'#'*65}")
 
     n_trades, n_snap, sim_ms = generate_data(db, args.trades)
     anomaly_metrics = bench_anomaly(db, args.latency_runs)
-    var_metrics = bench_var(db, args.latency_runs)
     clf_metrics = bench_classifier(db, args.latency_runs)
     e2e_metrics = bench_e2e(db, args.latency_runs)
 
@@ -405,7 +326,6 @@ def main():
         },
         "training_thresholds": {
             "anomaly_min_snapshots": 100,
-            "var_min_snapshots": 300,
             "classifier_min_snapshots": 300,
             "classifier_min_class_count": 30,
             "var_window_days": 30,
@@ -436,10 +356,6 @@ def main():
                 "GET  /portfolios/{id}/anomaly/score",
                 "GET  /portfolios/{id}/anomaly/history",
             ],
-            "var_forecasting": [
-                "POST /var/train",
-                "GET  /portfolios/{id}/var/forecast",
-            ],
             "risk_classification": [
                 "POST /risk-classifier/train",
                 "GET  /portfolios/{id}/risk-regime",
@@ -450,7 +366,6 @@ def main():
             ],
         },
         "phase2_anomaly_detection": anomaly_metrics,
-        "phase3_var_forecasting": var_metrics,
         "phase4_risk_classification": clf_metrics,
         "end_to_end_latency": e2e_metrics,
     }
@@ -469,7 +384,7 @@ def main():
     db.close()
     engine.dispose()
     for path in [BENCH_DB.lstrip("./"),
-                 ANOMALY_MODEL_PATH, VAR_MODEL_PATH, CLF_MODEL_PATH]:
+                 ANOMALY_MODEL_PATH, CLF_MODEL_PATH]:
         if os.path.exists(path):
             os.remove(path)
 

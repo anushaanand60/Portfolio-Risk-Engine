@@ -13,7 +13,6 @@ from app.services.position import update_position_logic
 from app.services.alerts import run_post_trade_alerts
 from app.services.feature_generation import generate_features_for_trade
 from app.services.anomaly_detector import score_anomaly
-from app.services.var_forecaster import predict_var_forecast
 from app.services.risk_classifier import predict_risk_regime
 
 TICKERS = ["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA"]
@@ -122,6 +121,5 @@ def generate_simulation_data(
         run_post_trade_alerts(db, trade)
         snapshot = generate_features_for_trade(db, trade)
         score_anomaly(db, snapshot)
-        predict_var_forecast(db, snapshot)
         predict_risk_regime(db, snapshot)
     db.commit()

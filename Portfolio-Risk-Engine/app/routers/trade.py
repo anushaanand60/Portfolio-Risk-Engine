@@ -8,7 +8,6 @@ from app.services.position import update_position_logic
 from app.services.alerts import run_post_trade_alerts
 from app.services.feature_generation import generate_features_for_trade
 from app.services.anomaly_detector import score_anomaly
-from app.services.var_forecaster import predict_var_forecast
 from app.services.risk_classifier import predict_risk_regime
 from app.core.redis import redis_delete
 
@@ -41,7 +40,6 @@ def create_trade(payload: TradeCreate, db: Session = Depends(get_db)):
     all_alerts = position_alerts + risk_alerts
     snapshot = generate_features_for_trade(db, trade)
     score_anomaly(db, snapshot)
-    predict_var_forecast(db, snapshot)
     predict_risk_regime(db, snapshot)
     db.commit()
     db.refresh(trade)

@@ -57,6 +57,10 @@ def client():
                     yield c
 
 def test_anomaly_detection_pipeline(client):
+    import random
+    import numpy as np
+    random.seed(42)
+    np.random.seed(42)
     resp = client.post("/anomaly/train", json={"contamination": 0.01})
     assert resp.status_code == 400
     assert "Insufficient data for training" in resp.json()["detail"]

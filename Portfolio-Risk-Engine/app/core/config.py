@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 from decimal import Decimal
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/trade_risk_monitor"
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/portfolio_risk_engine"
     REDIS_URL: str = "redis://localhost:6379/0"
     VAR_THRESHOLD: Decimal = Decimal("1000000.0000")
     CONCENTRATION_THRESHOLD: Decimal = Decimal("0.4000")

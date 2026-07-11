@@ -7,7 +7,6 @@ from app.routers.trade import router as trade_router
 from app.routers.simulate import router as simulate_router
 from app.routers.features import router as features_router
 from app.routers.anomaly import router as anomaly_router
-from app.routers.var_forecast import router as var_forecast_router
 from app.routers.risk_classifier import router as risk_classifier_router
 
 @asynccontextmanager
@@ -22,7 +21,6 @@ app.include_router(trade_router)
 app.include_router(simulate_router)
 app.include_router(features_router)
 app.include_router(anomaly_router)
-app.include_router(var_forecast_router)
 app.include_router(risk_classifier_router)
 
 @app.get("/health")
