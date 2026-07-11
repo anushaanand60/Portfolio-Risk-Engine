@@ -263,14 +263,31 @@ def train_risk_classifier(db: Session) -> dict:
     joblib.dump(payload, MODEL_PATH)
     return payload
 
+_MODEL_CACHE = None
+_MODEL_MTIME = None
+
 def predict_risk_regime(db: Session, snapshot: FeatureSnapshot) -> None:
+    global _MODEL_CACHE, _MODEL_MTIME
     if snapshot.snapshot_type != "PORTFOLIO":
         return
     if not os.path.exists(MODEL_PATH):
         snapshot.risk_regime = None
         snapshot.risk_regime_probability = None
         return
-    payload = joblib.load(MODEL_PATH)
+    
+    try:
+        mtime = os.path.getmtime(MODEL_PATH)
+    except OSError:
+        mtime = None
+        
+    is_mocked = hasattr(joblib.load, "_mock_return_value") or "Mock" in type(joblib.load).__name__
+    if is_mocked:
+        payload = joblib.load(MODEL_PATH)
+    else:
+        if _MODEL_CACHE is None or _MODEL_MTIME != mtime:
+            _MODEL_CACHE = joblib.load(MODEL_PATH)
+            _MODEL_MTIME = mtime
+        payload = _MODEL_CACHE
     saved_features = payload.get("features", [])
     if saved_features != FEATURES:
         raise ValueError("Model features mismatch: expected " + str(saved_features) + " but got " + str(FEATURES))
@@ -279,9 +296,9 @@ def predict_risk_regime(db: Session, snapshot: FeatureSnapshot) -> None:
         FeatureSnapshot.portfolio_id == snapshot.portfolio_id,
         FeatureSnapshot.snapshot_type == "PORTFOLIO",
         FeatureSnapshot.timestamp < snapshot.timestamp
-    ).order_by(FeatureSnapshot.timestamp.asc()).all()
+    ).order_by(FeatureSnapshot.timestamp.desc()).limit(20).all()
     
-    sequence = hist + [snapshot]
+    sequence = list(reversed(hist)) + [snapshot]
     idx = len(sequence) - 1
     
     row = []

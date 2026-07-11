@@ -10,7 +10,7 @@ class Trade(Base):
     quantity = Column(Numeric(precision=18, scale=4), nullable=False)
     price = Column(Numeric(precision=18, scale=4), nullable=False)
     side = Column(String, nullable=False)
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
     __table_args__ = (
         CheckConstraint("side IN ('BUY', 'SELL')", name="check_side_value"),

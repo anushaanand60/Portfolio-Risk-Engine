@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 import numpy as np
@@ -16,7 +17,11 @@ def compute_portfolio_var(db: Session, portfolio_id: int, confidence: Decimal = 
         ).label("daily_value"),
     ).filter(Trade.portfolio_id == portfolio_id)
     if as_of is not None:
-        query = query.filter(Trade.timestamp <= as_of)
+        start_date = as_of - timedelta(days=window + 1)
+        query = query.filter(Trade.timestamp >= start_date, Trade.timestamp <= as_of)
+    else:
+        start_date = datetime.now(timezone.utc) - timedelta(days=window + 1)
+        query = query.filter(Trade.timestamp >= start_date)
     daily_values = (
         query.group_by(func.date(Trade.timestamp))
         .order_by(func.date(Trade.timestamp).desc())
