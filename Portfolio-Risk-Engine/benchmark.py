@@ -27,14 +27,8 @@ from app.services.anomaly_detector import (
     train_global_anomaly_model, score_anomaly,
     FEATURES as ANOMALY_FEATURES, MODEL_PATH as ANOMALY_MODEL_PATH,
 )
-from app.services.risk_classifier import (
-    train_risk_classifier, predict_risk_regime,
-    FEATURES as CLF_FEATURES, MODEL_PATH as CLF_MODEL_PATH,
-    STATIC_FEATURES as CLF_STATIC_FEATURES,
-    DYNAMIC_FEATURES as CLF_DYNAMIC_FEATURES,
-)
 from app.services.market_simulator import (
-    generate_simulation_data, REGIME_SCHEDULE,
+    generate_simulation_data,
 )
 
 BENCH_DB = "./benchmark_run.db"
@@ -62,14 +56,9 @@ def fmt(label: str, value) -> str:
 
 def generate_data(db, n_trades: int):
     print(f"\n{SEP}")
-    print(f"  DATA GENERATION  ({n_trades} trades, regime-aware simulator)")
+    print(f"  DATA GENERATION  ({n_trades} trades, yfinance live simulator)")
     print(SEP)
-    print("  Volatility regime schedule:")
-    for start, end, name, sigma, beta in REGIME_SCHEDULE:
-        trades_start = int(start * n_trades)
-        trades_end = int(end * n_trades)
-        extra = f"  crisis_beta={beta}" if beta > 0 else ""
-        print(f"    [{trades_start:>4}-{trades_end:>4}]  {name:<12}  sigma={sigma:.3f}{extra}")
+    print("  Fetching historical data and distributing trades...")
     print()
 
     t0 = time.perf_counter()
@@ -135,89 +124,6 @@ def bench_anomaly(db, latency_runs: int):
     }
 
 
-# Phase 4: Risk Classifier
-def bench_classifier(db, latency_runs: int):
-    print(f"\n{SEP}")
-    print("  PHASE 4 — RISK REGIME CLASSIFICATION  (LR / RF / GBM)")
-    print(SEP)
-
-    res = train_risk_classifier(db)
-    size_mb = model_size_mb(CLF_MODEL_PATH)
-    lr = res["logistic_regression"]
-    rf = res["random_forest"]
-    gb = res["gradient_boosting"]
-    bl = res["baseline_metrics"]
-    q = res["var_quantiles"]
-
-    print(fmt("Selected model:", res["selected_model"]))
-    print(fmt("Training rows:", res["training_rows"]))
-    print(fmt("Test rows:", res["test_rows"]))
-    print(fmt("Training time:", f"{res['training_time_ms']:,.1f} ms"))
-    print(fmt("Model size:", f"{size_mb:.3f} MB"))
-    print()
-    print(fmt("VaR quantile thresholds (q25/q50/q75):", f"{q[0]:.4f} / {q[1]:.4f} / {q[2]:.4f}"))
-    print()
-    cc = res["class_counts"]
-    print(fmt("Class distribution (train):",
-              f"Low={cc['Low']}  Moderate={cc['Moderate']}  High={cc['High']}  Critical={cc['Critical']}"))
-    print()
-    print(f"  {'Model':<26} {'Accuracy':>9} {'Macro F1':>9} {'Weighted F1':>12}")
-    print(f"  {SUBSEP[:60]}")
-    print(f"  {'Persistence (baseline)':<26} {bl['accuracy']:>9.4f} {bl['macro_f1']:>9.4f} {bl['weighted_f1']:>12.4f}")
-    print(f"  {'LogisticRegression':<26} {lr['accuracy']:>9.4f} {lr['macro_f1']:>9.4f} {lr['weighted_f1']:>12.4f}")
-    print(f"  {'RandomForest':<26} {rf['accuracy']:>9.4f} {rf['macro_f1']:>9.4f} {rf['weighted_f1']:>12.4f}")
-    print(f"  {'GradientBoosting':<26} {gb['accuracy']:>9.4f} {gb['macro_f1']:>9.4f} {gb['weighted_f1']:>12.4f}")
-    print()
-    print("  Confusion Matrix  [rows=actual, cols=predicted]  Low/Mod/High/Crit:")
-    labels = ["Low ", "Mod ", "High", "Crit"]
-    for i, row in enumerate(res["confusion_matrix"]):
-        print(f"    {labels[i]} | " + "  ".join(f"{v:>4}" for v in row))
-    print()
-    print("  Top-10 Feature Importances:")
-    for rank, feat in enumerate(res["top_features"][:10], 1):
-        imp = res["feature_importances"].get(feat, 0.0)
-        print(f"    {rank:>2}. {feat:<38} {imp:.4f}")
-
-    sample = (
-        db.query(FeatureSnapshot)
-        .filter(FeatureSnapshot.snapshot_type == "PORTFOLIO")
-        .order_by(FeatureSnapshot.id.desc()).first()
-    )
-    lats = []
-    for _ in range(latency_runs):
-        t0 = time.perf_counter()
-        predict_risk_regime(db, sample)
-        lats.append((time.perf_counter() - t0) * 1000)
-    lats = np.array(lats)
-    print(fmt("Inference latency (median):", f"{np.median(lats):.3f} ms"))
-    print(fmt("Inference latency (p95):", f"{np.percentile(lats, 95):.3f} ms"))
-
-    return {
-        "selected_model": res["selected_model"],
-        "training_rows": res["training_rows"],
-        "test_rows": res["test_rows"],
-        "training_time_ms": round(res["training_time_ms"], 2),
-        "model_size_mb": round(size_mb, 4),
-        "var_quantiles": {"q25": round(q[0], 4), "q50": round(q[1], 4), "q75": round(q[2], 4)},
-        "class_counts_train": cc,
-        "regimes": ["Low", "Moderate", "High", "Critical"],
-        "logistic_regression": {k: round(v, 4) for k, v in lr.items()},
-        "random_forest": {k: round(v, 4) for k, v in rf.items()},
-        "gradient_boosting": {k: round(v, 4) for k, v in gb.items()},
-        "baseline": {k: round(v, 4) for k, v in bl.items()},
-        "confusion_matrix": res["confusion_matrix"],
-        "feature_importances": {k: round(v, 4) for k, v in res["feature_importances"].items()},
-        "top_10_features": res["top_features"][:10],
-        "static_features": CLF_STATIC_FEATURES,
-        "temporal_features": CLF_DYNAMIC_FEATURES,
-        "latency": {
-            "median_ms": round(float(np.median(lats)), 3),
-            "p95_ms": round(float(np.percentile(lats, 95)), 3),
-            "p99_ms": round(float(np.percentile(lats, 99)), 3),
-            "runs": latency_runs,
-        },
-    }
-
 def bench_e2e(db, latency_runs: int):
     print(f"\n{SEP}")
     print("  END-TO-END PIPELINE LATENCY")
@@ -226,7 +132,7 @@ def bench_e2e(db, latency_runs: int):
     portfolio_id = 1
     _= db.query(Position).filter(Position.portfolio_id == portfolio_id).first()
 
-    feat_lats, anomaly_lats, clf_lats, total_lats = [], [], [], []
+    feat_lats, anomaly_lats, total_lats = [], [], []
 
     for _ in range(latency_runs):
         trade = Trade(
@@ -250,10 +156,6 @@ def bench_e2e(db, latency_runs: int):
         score_anomaly(db, snapshot)
         anomaly_lats.append((time.perf_counter() - t0) * 1000)
 
-        t0 = time.perf_counter()
-        predict_risk_regime(db, snapshot)
-        clf_lats.append((time.perf_counter() - t0) * 1000)
-
         total_lats.append((time.perf_counter() - t_total) * 1000)
 
         db.rollback()
@@ -270,7 +172,6 @@ def bench_e2e(db, latency_runs: int):
     rows = [
         ("Feature generation",    feat_lats),
         ("Anomaly scoring",       anomaly_lats),
-        ("Risk classification",   clf_lats),
         ("Full pipeline",         total_lats),
     ]
     print(f"  {'Stage':<30} {'Mean':>8} {'Median':>8} {'P95':>8} {'P99':>8}")
@@ -284,7 +185,6 @@ def bench_e2e(db, latency_runs: int):
         "runs": latency_runs,
         "feature_generation": stats(feat_lats),
         "anomaly_scoring":    stats(anomaly_lats),
-        "risk_classification":stats(clf_lats),
         "full_pipeline":      stats(total_lats),
     }
 
@@ -313,7 +213,6 @@ def main():
 
     n_trades, n_snap, sim_ms = generate_data(db, args.trades)
     anomaly_metrics = bench_anomaly(db, args.latency_runs)
-    clf_metrics = bench_classifier(db, args.latency_runs)
     e2e_metrics = bench_e2e(db, args.latency_runs)
 
     report = {
@@ -326,8 +225,6 @@ def main():
         },
         "training_thresholds": {
             "anomaly_min_snapshots": 100,
-            "classifier_min_snapshots": 300,
-            "classifier_min_class_count": 30,
             "var_window_days": 30,
             "var_confidence_level": 0.95,
             "concentration_alert_threshold": 0.40,
@@ -356,17 +253,11 @@ def main():
                 "GET  /portfolios/{id}/anomaly/score",
                 "GET  /portfolios/{id}/anomaly/history",
             ],
-            "risk_classification": [
-                "POST /risk-classifier/train",
-                "GET  /portfolios/{id}/risk-regime",
-                "GET  /portfolios/{id}/risk-regime/history",
-            ],
             "system": [
                 "GET  /health",
             ],
         },
         "phase2_anomaly_detection": anomaly_metrics,
-        "phase4_risk_classification": clf_metrics,
         "end_to_end_latency": e2e_metrics,
     }
 
@@ -383,8 +274,7 @@ def main():
 
     db.close()
     engine.dispose()
-    for path in [BENCH_DB.lstrip("./"),
-                 ANOMALY_MODEL_PATH, CLF_MODEL_PATH]:
+    for path in [BENCH_DB.lstrip("./"), ANOMALY_MODEL_PATH]:
         if os.path.exists(path):
             os.remove(path)
 

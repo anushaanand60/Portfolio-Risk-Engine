@@ -1,9 +1,8 @@
 import math
 import random
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
-import numpy as np
 from app.models.trade import Trade
 from app.models.position import Position
 from app.models.portfolio import Portfolio
@@ -13,57 +12,13 @@ from app.services.position import update_position_logic
 from app.services.alerts import run_post_trade_alerts
 from app.services.feature_generation import generate_features_for_trade
 from app.services.anomaly_detector import score_anomaly
-from app.services.risk_classifier import predict_risk_regime
+from app.services.market_data import get_historical_prices
 
 TICKERS = ["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA"]
-
-BASE_PRICES = {
-    "AAPL": 150.0,
-    "GOOGL": 140.0,
-    "MSFT": 310.0,
-    "AMZN": 180.0,
-    "TSLA": 220.0,
-}
-
-REGIME_SCHEDULE = [
-    (0.00, 0.23, "LOW_VOL",    0.007, 0.00),
-    (0.23, 0.36, "CRISIS",     0.048, 0.88),
-    (0.36, 0.62, "NORMAL_VOL", 0.018, 0.00),
-    (0.62, 0.78, "HIGH_VOL",   0.032, 0.00),
-    (0.78, 1.00, "NORMAL_VOL", 0.015, 0.00),
-]
 
 EXPOSURE_SHOCK_PROB = 0.03
 NORMAL_QTY_RANGE = (10, 100)
 SHOCK_QTY_RANGE = (3000, 12000)
-
-
-def _get_regime(step: int, n_steps: int):
-    frac = step / max(n_steps, 1)
-    for start, end, name, sigma, beta in REGIME_SCHEDULE:
-        if start <= frac < end:
-            return name, sigma, beta
-    return "NORMAL_VOL", 0.018, 0.00
-
-
-def _generate_price_paths(n_steps: int) -> dict:
-    paths = {t: [BASE_PRICES[t]] for t in TICKERS}
-    for step in range(n_steps):
-        _, sigma, crisis_beta = _get_regime(step, n_steps)
-        if crisis_beta > 0:
-            market_factor = np.random.normal(0, sigma)
-            for ticker in TICKERS:
-                idio_sigma = sigma * 0.25
-                ret = crisis_beta * market_factor + np.random.normal(0, idio_sigma)
-                new_price = max(paths[ticker][-1] * math.exp(ret), 2.0)
-                paths[ticker].append(new_price)
-        else:
-            for ticker in TICKERS:
-                ret = np.random.normal(0, sigma)
-                new_price = max(paths[ticker][-1] * math.exp(ret), 2.0)
-                paths[ticker].append(new_price)
-    return paths
-
 
 def generate_simulation_data(
     db: Session,
@@ -80,13 +35,27 @@ def generate_simulation_data(
         db.add(Portfolio(id=portfolio_id, name=f"SimPortfolio-{portfolio_id}"))
         db.commit()
 
+    end_date = datetime.now(timezone.utc)
     if start_date is None:
-        start_date = datetime.now(timezone.utc) - timedelta(days=num_trades)
+        days_to_fetch = max(num_trades, int(num_trades * 1.5)) + 10
+        start_date = end_date - timedelta(days=days_to_fetch)
 
-    price_paths = _generate_price_paths(num_trades)
+    prices_data = get_historical_prices(TICKERS, start_date, end_date)
 
-    for step in range(num_trades):
-        ticker = random.choice(TICKERS)
+    available_data = []
+    for ticker, data_list in prices_data.items():
+        for item in data_list:
+            available_data.append((ticker, item['date'], item['price']))
+
+    available_data.sort(key=lambda x: x[1])
+
+    if not available_data:
+        return
+
+    indices = sorted(random.choices(range(len(available_data)), k=num_trades))
+
+    for i in indices:
+        ticker, date_val, price_val = available_data[i]
         side = "BUY" if random.random() < 0.70 else "SELL"
 
         is_exposure_shock = random.random() < EXPOSURE_SHOCK_PROB
@@ -95,8 +64,7 @@ def generate_simulation_data(
         else:
             quantity = Decimal(str(random.randint(*NORMAL_QTY_RANGE)))
 
-        price_float = price_paths[ticker][step + 1]
-        price = Decimal(str(round(price_float, 4)))
+        price = Decimal(str(round(price_val, 4)))
 
         if side == "SELL":
             existing = db.query(Position).filter(
@@ -106,7 +74,7 @@ def generate_simulation_data(
             if existing is None or existing.net_quantity < quantity:
                 side = "BUY"
 
-        trade_time = start_date + timedelta(days=step, minutes=random.randint(0, 59))
+        trade_time = date_val.replace(tzinfo=timezone.utc) + timedelta(minutes=random.randint(0, 390))
         trade = Trade(
             portfolio_id=portfolio_id,
             ticker=ticker,
@@ -121,5 +89,4 @@ def generate_simulation_data(
         run_post_trade_alerts(db, trade)
         snapshot = generate_features_for_trade(db, trade)
         score_anomaly(db, snapshot)
-        predict_risk_regime(db, snapshot)
     db.commit()

@@ -33,8 +33,6 @@ class FeatureSnapshot(Base):
     anomaly_score = Column(Numeric(precision=18, scale=4), nullable=True)
     is_anomaly = Column(Boolean, nullable=True)
     anomaly_explanation = Column(String, nullable=True)
-    risk_regime = Column(String, nullable=True)
-    risk_regime_probability = Column(Numeric(precision=18, scale=4), nullable=True)
 
     __table_args__ = (
         Index("idx_portfolio_timestamp", "portfolio_id", "timestamp"),

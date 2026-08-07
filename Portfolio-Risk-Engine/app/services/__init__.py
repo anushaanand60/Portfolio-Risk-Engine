@@ -4,4 +4,3 @@ from app.services.alerts import run_post_trade_alerts
 from app.services.feature_generation import generate_features_for_trade
 from app.services.anomaly_detector import score_anomaly, train_global_anomaly_model
 from app.services.market_simulator import generate_simulation_data
-from app.services.risk_classifier import train_risk_classifier, predict_risk_regime
